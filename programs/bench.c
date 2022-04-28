@@ -52,6 +52,7 @@
 #define LZ4_HC_STATIC_LINKING_ONLY
 #include "lz4hc.h"
 
+#include "QatCoDecApi.h"
 
 /* *************************************
 *  Compression parameters and functions
@@ -315,7 +316,7 @@ typedef struct {
 
 #define MIN(a,b) ((a)<(b) ? (a) : (b))
 #define MAX(a,b) ((a)>(b) ? (a) : (b))
-
+#define QAT_LZ4
 static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
                         const char* displayName, int cLevel,
                         const size_t* fileSizes, U32 nbFiles,
@@ -324,7 +325,8 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
     size_t const blockSize = (g_blockSize>=32 ? g_blockSize : srcSize) + (!srcSize) /* avoid div by 0 */ ;
     U32 const maxNbBlocks = (U32) ((srcSize + (blockSize-1)) / blockSize) + nbFiles;
     blockParam_t* const blockTable = (blockParam_t*) malloc(maxNbBlocks * sizeof(blockParam_t));
-    size_t const maxCompressedSize = LZ4_compressBound((int)srcSize) + (maxNbBlocks * 1024);   /* add some room for safety */
+    //size_t const maxCompressedSize = LZ4_compressBound((int)srcSize) + (maxNbBlocks * 1024);   /* add some room for safety */
+    size_t const maxCompressedSize = LZ4_compressBound((int)srcSize) + (maxNbBlocks * 2048);   /* add some room for safety */
     void* const compressedBuffer = malloc(maxCompressedSize);
     void* const resultBuffer = malloc(srcSize);
     U32 nbBlocks;
@@ -340,6 +342,9 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
     LZ4_buildCompressionParameters(&compP, cLevel, dictBuf, dictSize);
     compP.initFunction(&compP);
 
+#ifdef QAT_LZ4
+    void * qat_codec_ptr = getQatCodecInst();
+#endif
     /* Init blockTable data */
     {   const char* srcPtr = (const char*)srcBuffer;
         char* cPtr = (char*)compressedBuffer;
@@ -360,6 +365,7 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
                 cPtr += blockTable[nbBlocks].cRoom;
                 resPtr += thisBlockSize;
                 remaining -= thisBlockSize;
+                DISPLAYLEVEL(3, "blockTable init , nbBlocks=%d, srcSize=%d, destSize=%d \n ", nbBlocks, blockTable[nbBlocks].srcSize, blockTable[nbBlocks].cRoom);
     }   }   }
 
     /* warmimg up memory */
@@ -404,10 +410,15 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
                     U32 blockNb;
                     compP.resetFunction(&compP);
                     for (blockNb=0; blockNb<nbBlocks; blockNb++) {
+#ifndef QAT_LZ4
                         size_t const rSize = (size_t)compP.blockFunction(
                             &compP,
                             blockTable[blockNb].srcPtr, blockTable[blockNb].cPtr,
                             (int)blockTable[blockNb].srcSize, (int)blockTable[blockNb].cRoom);
+#else
+                          size_t const rSize = (size_t)qatCompress(qat_codec_ptr, blockTable[blockNb].srcPtr, (unsigned int)blockTable[blockNb].srcSize, blockTable[blockNb].cPtr);
+                          DISPLAYLEVEL(3, "qzCompress srcSize=%d, destSize=%d\n ", blockTable[blockNb].srcSize, blockTable[blockNb].cRoom);
+#endif
                         if (LZ4_isError(rSize)) EXM_THROW(1, "LZ4 compression failed");
                         blockTable[blockNb].cSize = rSize;
                 }   }
@@ -448,11 +459,27 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
                 for (nbLoops=0; nbLoops < nbDecodeLoops; nbLoops++) {
                     U32 blockNb;
                     for (blockNb=0; blockNb<nbBlocks; blockNb++) {
+                       #if 0
+                       DISPLAY("Cptr content: \n");
+
+                       for (int k=0; k<20; k++)
+                       {
+                           DISPLAY("0x%x, ", blockTable[blockNb].cPtr[k]);
+                       }
+                       DISPLAY("\n");
+                     #endif
+#ifndef QAT_LZ4                    
                         int const regenSize = LZ4_decompress_safe_usingDict(
                             blockTable[blockNb].cPtr, blockTable[blockNb].resPtr,
                             (int)blockTable[blockNb].cSize, (int)blockTable[blockNb].srcSize,
                             dictBuf, dictSize);
-                        if (regenSize < 0) {
+#else
+                       int ret = qatDecompress(qat_codec_ptr, blockTable[blockNb].cPtr, (unsigned int)blockTable[blockNb].cSize, blockTable[blockNb].resPtr, (unsigned int)blockTable[blockNb].srcSize);
+                       assert(ret == 0);
+                       int regenSize = (int)blockTable[blockNb].srcSize;
+                       DISPLAYLEVEL(3, "qzDecompress cSize=%d, srcSize=%d\n ", blockTable[blockNb].cSize, blockTable[blockNb].srcSize);
+#endif
+                        if (regenSize <= 0) {
                             DISPLAY("LZ4_decompress_safe_usingDict() failed on block %u \n", blockNb);
                             break;
                         }
@@ -517,6 +544,9 @@ static int BMK_benchMem(const void* srcBuffer, size_t srcSize,
     }   /* Bench */
 
     /* clean up */
+#ifdef QAT_LZ4
+    relQatCodecInst(qat_codec_ptr);
+#endif
     compP.cleanupFunction(&compP);
     free(blockTable);
     free(compressedBuffer);

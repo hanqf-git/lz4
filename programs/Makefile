@@ -31,6 +31,10 @@
 SED = sed
 
 # Version numbers
+QATCODEC_PATH = /home/qiufeng/QAT_lz4_dev/qatcodec
+QATCODEC_LIB = $(QATCODEC_PATH)/libqatcodec.so
+QATCODEC_INC = $(QATCODEC_PATH)
+
 LZ4DIR   := ../lib
 LIBVER_SRC := $(LZ4DIR)/lz4.h
 LIBVER_MAJOR_SCRIPT:=`$(SED) -n '/define LZ4_VERSION_MAJOR/s/.*[[:blank:]]\([0-9][0-9]*\).*/\1/p' < $(LIBVER_SRC)`
@@ -46,7 +50,7 @@ LIBFILES  = $(wildcard $(LZ4DIR)/*.c)
 SRCFILES  = $(sort $(LIBFILES) $(wildcard *.c))
 OBJFILES  = $(SRCFILES:.c=.o)
 
-CPPFLAGS += -I$(LZ4DIR) -DXXH_NAMESPACE=LZ4_
+CPPFLAGS += -I$(LZ4DIR) -I$(QATCODEC_INC) -DXXH_NAMESPACE=LZ4_
 CFLAGS   ?= -O3
 DEBUGFLAGS= -Wall -Wextra -Wundef -Wcast-qual -Wcast-align -Wshadow \
             -Wswitch-enum -Wdeclaration-after-statement -Wstrict-prototypes \
@@ -94,7 +98,7 @@ lz4: $(OBJFILES) lz4-exe.o
 	$(CC) $(FLAGS) $^ -o $@$(EXT)
 else
 lz4: $(OBJFILES)
-	$(CC) $(FLAGS) $(OBJFILES) -o $@$(EXT) $(LDLIBS)
+	$(CC) $(FLAGS) $(OBJFILES) -o $@$(EXT) $(LDLIBS)  $(QATCODEC_LIB)
 endif
 
 .PHONY: lz4-release
