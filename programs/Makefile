@@ -31,7 +31,7 @@
 SED = sed
 
 # Version numbers
-QATCODEC_PATH = /home/qiufeng/QAT_lz4_dev/qatcodec
+QATCODEC_PATH = /home/qiufeng/qat_lz4_dev/qatcodec
 QATCODEC_LIB = $(QATCODEC_PATH)/libqatcodec.so
 QATCODEC_INC = $(QATCODEC_PATH)
 
